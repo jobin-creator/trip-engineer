@@ -11,14 +11,14 @@ type TripForm = {
   days: string;
   interests: string;
   budget: string;
+  arrivalDate: string;
+  departureDate: string;
 };
 
 type TravelForm = {
   departureCity: string;
   stayArea: string;
-  arrivalDate: string;
   arrivalTime: string;
-  departureDate: string;
   departureTime: string;
 };
 
@@ -27,18 +27,31 @@ const INITIAL_TRIP: TripForm = {
   days: "5",
   interests: "",
   budget: "mid-range",
+  arrivalDate: "",
+  departureDate: "",
 };
 
 const INITIAL_TRAVEL: TravelForm = {
   departureCity: "",
   stayArea: "",
-  arrivalDate: "",
   arrivalTime: "",
-  departureDate: "",
   departureTime: "",
 };
 
 type Tab = "trip" | "travel";
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+// Returns the number of nights between two date strings, or null if invalid
+function calcNights(arrival: string, departure: string): number | null {
+  if (!arrival || !departure) return null;
+  const a = new Date(arrival);
+  const d = new Date(departure);
+  if (isNaN(a.getTime()) || isNaN(d.getTime())) return null;
+  return Math.round((d.getTime() - a.getTime()) / (1000 * 60 * 60 * 24));
+}
 
 // ---------------------------------------------------------------------------
 // Main page component
@@ -51,10 +64,43 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>("");
 
+  // Derived state — computed on every render, no extra useState needed
+  const nights = calcNights(trip.arrivalDate, trip.departureDate);
+  const dateError: string | null =
+    nights !== null && nights < 0
+      ? "Departure date must be after arrival date."
+      : null;
+  const daysMismatch: number | null =
+    nights !== null && nights > 0 && nights !== parseInt(trip.days, 10)
+      ? nights
+      : null;
+
   function handleTripChange(
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>
   ) {
-    setTrip((prev) => ({ ...prev, [e.target.name]: e.target.value }));
+    const { name, value } = e.target;
+    setTrip((prev) => {
+      const updated = { ...prev, [name]: value };
+
+      // Auto-derive days when both dates are set and valid
+      if (name === "arrivalDate" || name === "departureDate") {
+        const arrival = name === "arrivalDate" ? value : prev.arrivalDate;
+        const departure = name === "departureDate" ? value : prev.departureDate;
+        const n = calcNights(arrival, departure);
+        if (n !== null && n > 0) {
+          // Clamp to the options we offer (1–14); pick the closest available
+          const OPTIONS = [1, 2, 3, 4, 5, 6, 7, 10, 14];
+          const clamped = OPTIONS.reduce((best, opt) =>
+            Math.abs(opt - n) < Math.abs(best - n) ? opt : best
+          );
+          updated.days = String(clamped === n ? n : clamped);
+          // If n is not in OPTIONS, keep the exact value so the warning shows
+          if (!OPTIONS.includes(n)) updated.days = String(Math.min(Math.max(n, 1), 14));
+        }
+      }
+
+      return updated;
+    });
   }
 
   function handleTravelChange(
@@ -63,8 +109,15 @@ export default function Home() {
     setTravel((prev) => ({ ...prev, [e.target.name]: e.target.value }));
   }
 
+  function syncDaysToDate() {
+    if (nights !== null && nights > 0) {
+      setTrip((prev) => ({ ...prev, days: String(Math.min(Math.max(nights, 1), 14)) }));
+    }
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (dateError) return; // hard block on invalid date range
     setError("");
     setItinerary("");
     setLoading(true);
@@ -80,9 +133,9 @@ export default function Home() {
           budget: trip.budget,
           departureCity: travel.departureCity,
           stayArea: travel.stayArea,
-          arrivalDate: travel.arrivalDate,
+          arrivalDate: trip.arrivalDate,
           arrivalTime: travel.arrivalTime,
-          departureDate: travel.departureDate,
+          departureDate: trip.departureDate,
           departureTime: travel.departureTime,
         }),
       });
@@ -113,12 +166,13 @@ export default function Home() {
     setTrip(INITIAL_TRIP);
     setTravel(INITIAL_TRAVEL);
     setActiveTab("trip");
+    setError("");
   }
 
-  const canSubmit = !loading && trip.destination.trim().length > 0;
+  const canSubmit = !loading && trip.destination.trim().length > 0 && !dateError;
   const hasResult = itinerary.length > 0;
 
-  // Count how many travel info fields are filled (for the badge)
+  // Badge: count filled travel fields only (times + origin + stay)
   const travelFilled = Object.values(travel).filter((v) => v.trim().length > 0).length;
 
   return (
@@ -142,9 +196,8 @@ export default function Home() {
       </header>
 
       <main>
-        {/* ── Form card with tabs ── */}
         <section className="form-card" aria-label="Trip planner">
-          {/* Tab bar */}
+          {/* ── Tab bar ── */}
           <div className="tab-bar" role="tablist">
             <button
               role="tab"
@@ -169,8 +222,12 @@ export default function Home() {
           </div>
 
           <form onSubmit={handleSubmit} noValidate>
-            {/* ── Tab 1: Trip details ── */}
+
+            {/* ════════════════════════════════
+                Tab 1 — Trip details
+            ════════════════════════════════ */}
             <div role="tabpanel" hidden={activeTab !== "trip"} className="tab-panel">
+
               <div className="field">
                 <label htmlFor="destination">Where are you going?</label>
                 <input
@@ -186,6 +243,54 @@ export default function Home() {
                 />
               </div>
 
+              {/* Dates row */}
+              <div className="field-row">
+                <div className="field">
+                  <label htmlFor="arrivalDate">Arrival date <span className="label-hint">(optional)</span></label>
+                  <input
+                    id="arrivalDate"
+                    name="arrivalDate"
+                    type="date"
+                    value={trip.arrivalDate}
+                    onChange={handleTripChange}
+                    disabled={loading}
+                    className={dateError ? "input-error" : ""}
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="departureDate">Departure date <span className="label-hint">(optional)</span></label>
+                  <input
+                    id="departureDate"
+                    name="departureDate"
+                    type="date"
+                    value={trip.departureDate}
+                    onChange={handleTripChange}
+                    disabled={loading}
+                    className={dateError ? "input-error" : ""}
+                  />
+                </div>
+              </div>
+
+              {/* Hard error: invalid date range */}
+              {dateError && (
+                <div className="inline-error" role="alert">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                  {dateError}
+                </div>
+              )}
+
+              {/* Soft warning: days vs date mismatch */}
+              {daysMismatch !== null && !dateError && (
+                <div className="inline-warning" role="status">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                  <span>Your dates span {daysMismatch} days but &ldquo;Number of days&rdquo; is set to {trip.days}.</span>
+                  <button type="button" className="fix-btn" onClick={syncDaysToDate}>
+                    Set to {daysMismatch}
+                  </button>
+                </div>
+              )}
+
+              {/* Days + Budget row */}
               <div className="field-row">
                 <div className="field">
                   <label htmlFor="days">Number of days</label>
@@ -196,14 +301,13 @@ export default function Home() {
                     onChange={handleTripChange}
                     disabled={loading}
                   >
-                    {[1, 2, 3, 4, 5, 6, 7, 10, 14].map((n) => (
+                    {Array.from({ length: 14 }, (_, i) => i + 1).map((n) => (
                       <option key={n} value={String(n)}>
                         {n} {n === 1 ? "day" : "days"}
                       </option>
                     ))}
                   </select>
                 </div>
-
                 <div className="field">
                   <label htmlFor="budget">Budget</label>
                   <select
@@ -246,7 +350,9 @@ export default function Home() {
               </div>
             </div>
 
-            {/* ── Tab 2: Travel info ── */}
+            {/* ════════════════════════════════
+                Tab 2 — Travel info
+            ════════════════════════════════ */}
             <div role="tabpanel" hidden={activeTab !== "travel"} className="tab-panel">
 
               <div className="section-label">Travelling from</div>
@@ -283,19 +389,8 @@ export default function Home() {
                 </div>
               </div>
 
-              <div className="section-label">Dates and times</div>
+              <div className="section-label">Arrival and departure times</div>
               <div className="field-row">
-                <div className="field">
-                  <label htmlFor="arrivalDate">Arrival date</label>
-                  <input
-                    id="arrivalDate"
-                    name="arrivalDate"
-                    type="date"
-                    value={travel.arrivalDate}
-                    onChange={handleTravelChange}
-                    disabled={loading}
-                  />
-                </div>
                 <div className="field">
                   <label htmlFor="arrivalTime">
                     Arrival time <span className="label-hint">(local)</span>
@@ -309,19 +404,6 @@ export default function Home() {
                     disabled={loading}
                   />
                   <p className="field-hint">Day 1 activities start after this</p>
-                </div>
-              </div>
-              <div className="field-row">
-                <div className="field">
-                  <label htmlFor="departureDate">Departure date</label>
-                  <input
-                    id="departureDate"
-                    name="departureDate"
-                    type="date"
-                    value={travel.departureDate}
-                    onChange={handleTravelChange}
-                    disabled={loading}
-                  />
                 </div>
                 <div className="field">
                   <label htmlFor="departureTime">
@@ -347,24 +429,14 @@ export default function Home() {
               </div>
 
               <div className="tab-nav tab-nav-split">
-                <button
-                  type="button"
-                  className="back-btn"
-                  onClick={() => setActiveTab("trip")}
-                >
+                <button type="button" className="back-btn" onClick={() => setActiveTab("trip")}>
                   ← Back
                 </button>
-                {error && (
-                  <p className="error" role="alert">
-                    {error}
-                  </p>
-                )}
                 <button type="submit" className="submit-btn" disabled={!canSubmit}>
-                  {loading ? (
-                    <><span className="spinner" aria-hidden="true" />Building…</>
-                  ) : (
-                    "Build my itinerary →"
-                  )}
+                  {loading
+                    ? <><span className="spinner" aria-hidden="true" />Building…</>
+                    : "Build my itinerary →"
+                  }
                 </button>
               </div>
             </div>
@@ -374,11 +446,10 @@ export default function Home() {
               <div className="tab-submit">
                 {error && <p className="error" role="alert">{error}</p>}
                 <button type="submit" className="submit-btn" disabled={!canSubmit}>
-                  {loading ? (
-                    <><span className="spinner" aria-hidden="true" />Building…</>
-                  ) : (
-                    "Build my itinerary →"
-                  )}
+                  {loading
+                    ? <><span className="spinner" aria-hidden="true" />Building…</>
+                    : "Build my itinerary →"
+                  }
                 </button>
               </div>
             )}
@@ -390,9 +461,7 @@ export default function Home() {
           <section className="result" aria-label="Generated itinerary" aria-live="polite">
             <div className="result-header">
               <h2>Your itinerary</h2>
-              <button className="reset-btn" onClick={handleReset}>
-                Start over
-              </button>
+              <button className="reset-btn" onClick={handleReset}>Start over</button>
             </div>
             <div className="markdown-body">
               <ReactMarkdown>{itinerary}</ReactMarkdown>
@@ -415,6 +484,9 @@ export default function Home() {
           --accent: #1d5fc4;
           --accent-hover: #174ea3;
           --accent-light: #e8f0fd;
+          --warning: #92600a;
+          --warning-bg: #fef9ec;
+          --warning-border: #f0c84a;
           --error: #c0392b;
           --error-bg: #fdf0ee;
           --radius: 10px;
@@ -431,6 +503,9 @@ export default function Home() {
             --accent: #5b8dee;
             --accent-hover: #7aa3f2;
             --accent-light: #1e2a44;
+            --warning: #e8b84b;
+            --warning-bg: #2a2210;
+            --warning-border: #7a5a10;
             --error: #e06c5a;
             --error-bg: #2d1a17;
             --shadow: 0 1px 4px rgba(0,0,0,0.3), 0 0 0 0.5px rgba(255,255,255,0.04);
@@ -447,30 +522,12 @@ export default function Home() {
           -webkit-font-smoothing: antialiased;
         }
 
-        .page {
-          max-width: 680px;
-          margin: 0 auto;
-          padding: 2rem 1rem 4rem;
-        }
+        .page { max-width: 680px; margin: 0 auto; padding: 2rem 1rem 4rem; }
 
         /* ── Header ── */
         .header { margin-bottom: 2rem; }
-
-        .logo {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          font-size: 20px;
-          font-weight: 600;
-          color: var(--text);
-          margin-bottom: 4px;
-        }
-
-        .tagline {
-          font-size: 14px;
-          color: var(--muted);
-          margin-left: 38px;
-        }
+        .logo { display: flex; align-items: center; gap: 10px; font-size: 20px; font-weight: 600; color: var(--text); margin-bottom: 4px; }
+        .tagline { font-size: 14px; color: var(--muted); margin-left: 38px; }
 
         /* ── Form card ── */
         .form-card {
@@ -483,288 +540,117 @@ export default function Home() {
         }
 
         /* ── Tabs ── */
-        .tab-bar {
-          display: flex;
-          border-bottom: 0.5px solid var(--border);
-        }
-
+        .tab-bar { display: flex; border-bottom: 0.5px solid var(--border); }
         .tab {
-          display: flex;
-          align-items: center;
-          gap: 7px;
-          padding: 12px 20px;
-          font-size: 14px;
-          font-family: var(--font);
-          font-weight: 400;
-          color: var(--muted);
-          background: none;
-          border: none;
-          border-bottom: 2px solid transparent;
-          cursor: pointer;
-          transition: color 0.15s;
+          display: flex; align-items: center; gap: 7px;
+          padding: 12px 20px; font-size: 14px; font-family: var(--font);
+          font-weight: 400; color: var(--muted); background: none; border: none;
+          border-bottom: 2px solid transparent; cursor: pointer; transition: color 0.15s;
         }
-
-        .tab-active {
-          color: var(--text);
-          font-weight: 500;
-          border-bottom-color: var(--text);
-        }
-
-        .tab-badge {
-          font-size: 11px;
-          font-weight: 400;
-          padding: 2px 7px;
-          border-radius: 20px;
-          background: var(--border);
-          color: var(--muted);
-        }
-
-        .tab-badge-filled {
-          background: var(--accent-light);
-          color: var(--accent);
-        }
+        .tab-active { color: var(--text); font-weight: 500; border-bottom-color: var(--text); }
+        .tab-badge { font-size: 11px; font-weight: 400; padding: 2px 7px; border-radius: 20px; background: var(--border); color: var(--muted); }
+        .tab-badge-filled { background: var(--accent-light); color: var(--accent); }
 
         /* ── Tab panels ── */
-        .tab-panel {
-          padding: 1.5rem;
-        }
-
+        .tab-panel { padding: 1.5rem; }
         .section-label {
-          font-size: 11px;
-          font-weight: 600;
-          text-transform: uppercase;
-          letter-spacing: 0.07em;
-          color: var(--muted);
-          margin-bottom: 1rem;
-          padding-bottom: 8px;
-          border-bottom: 0.5px solid var(--border);
+          font-size: 11px; font-weight: 600; text-transform: uppercase;
+          letter-spacing: 0.07em; color: var(--muted);
+          margin-bottom: 1rem; padding-bottom: 8px; border-bottom: 0.5px solid var(--border);
         }
 
         /* ── Fields ── */
         .field { margin-bottom: 1.25rem; }
-
-        .field-row {
-          display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 1rem;
-          margin-bottom: 0;
-        }
-
+        .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
         .field-row .field { margin-bottom: 1.25rem; }
+        label { display: block; font-size: 14px; font-weight: 500; margin-bottom: 6px; color: var(--text); }
+        .label-hint { font-weight: 400; color: var(--muted); }
+        .field-hint { font-size: 12px; color: var(--muted); margin-top: 5px; }
 
-        label {
-          display: block;
-          font-size: 14px;
-          font-weight: 500;
-          margin-bottom: 6px;
-          color: var(--text);
-        }
-
-        .label-hint {
-          font-weight: 400;
-          color: var(--muted);
-        }
-
-        .field-hint {
-          font-size: 12px;
-          color: var(--muted);
-          margin-top: 5px;
-        }
-
-        input[type="text"],
-        input[type="date"],
-        input[type="time"],
-        select,
-        textarea {
-          width: 100%;
-          padding: 9px 12px;
-          font-size: 15px;
-          font-family: var(--font);
-          color: var(--text);
-          background: var(--bg);
-          border: 0.5px solid var(--border);
-          border-radius: var(--radius);
-          outline: none;
+        input[type="text"], input[type="date"], input[type="time"], select, textarea {
+          width: 100%; padding: 9px 12px; font-size: 15px; font-family: var(--font);
+          color: var(--text); background: var(--bg); border: 0.5px solid var(--border);
+          border-radius: var(--radius); outline: none;
           transition: border-color 0.15s, box-shadow 0.15s;
           -webkit-appearance: none;
         }
-
-        input[type="date"],
-        input[type="time"] {
-          cursor: pointer;
-        }
-
+        input[type="date"], input[type="time"] { cursor: pointer; }
         select {
           cursor: pointer;
           background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23888' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
-          background-repeat: no-repeat;
-          background-position: right 12px center;
-          padding-right: 32px;
+          background-repeat: no-repeat; background-position: right 12px center; padding-right: 32px;
         }
-
-        textarea {
-          resize: vertical;
-          min-height: 72px;
-        }
-
-        input:focus,
-        select:focus,
-        textarea:focus {
+        textarea { resize: vertical; min-height: 72px; }
+        input:focus, select:focus, textarea:focus {
           border-color: var(--accent);
           box-shadow: 0 0 0 3px var(--accent-light);
         }
-
-        input:disabled,
-        select:disabled,
-        textarea:disabled {
-          opacity: 0.5;
-          cursor: not-allowed;
+        input.input-error, input.input-error:focus {
+          border-color: var(--error);
+          box-shadow: 0 0 0 3px var(--error-bg);
         }
+        input:disabled, select:disabled, textarea:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        /* ── Inline error / warning ── */
+        .inline-error, .inline-warning {
+          display: flex; align-items: center; gap: 8px;
+          font-size: 13px; border-radius: var(--radius);
+          padding: 9px 12px; margin-bottom: 1rem; line-height: 1.4;
+        }
+        .inline-error { color: var(--error); background: var(--error-bg); border: 0.5px solid var(--error); }
+        .inline-error svg { stroke: var(--error); flex-shrink: 0; }
+        .inline-warning { color: var(--warning); background: var(--warning-bg); border: 0.5px solid var(--warning-border); flex-wrap: wrap; }
+        .inline-warning svg { stroke: var(--warning); flex-shrink: 0; }
+        .fix-btn {
+          margin-left: auto; font-size: 12px; font-family: var(--font);
+          font-weight: 500; color: var(--warning); background: none;
+          border: 0.5px solid var(--warning-border); border-radius: 5px;
+          padding: 3px 9px; cursor: pointer; white-space: nowrap;
+          transition: background 0.15s;
+        }
+        .fix-btn:hover { background: var(--warning-border); color: #fff; }
 
         /* ── Weather callout ── */
         .weather-callout {
-          display: flex;
-          align-items: flex-start;
-          gap: 10px;
-          padding: 10px 14px;
-          background: var(--accent-light);
-          border: 0.5px solid var(--accent);
-          border-radius: var(--radius);
-          font-size: 13px;
-          color: var(--accent);
-          margin-bottom: 1.25rem;
-          line-height: 1.5;
+          display: flex; align-items: flex-start; gap: 10px;
+          padding: 10px 14px; background: var(--accent-light);
+          border: 0.5px solid var(--accent); border-radius: var(--radius);
+          font-size: 13px; color: var(--accent); margin-bottom: 1.25rem; line-height: 1.5;
         }
-
-        .weather-callout svg {
-          flex-shrink: 0;
-          margin-top: 1px;
-          stroke: var(--accent);
-        }
+        .weather-callout svg { flex-shrink: 0; margin-top: 1px; stroke: var(--accent); }
 
         /* ── Tab navigation ── */
-        .tab-nav {
-          display: flex;
-          justify-content: flex-end;
-          padding-top: 0.5rem;
-          border-top: 0.5px solid var(--border);
-          margin-top: 0.5rem;
-        }
-
-        .tab-nav-split {
-          justify-content: space-between;
-          align-items: center;
-          flex-wrap: wrap;
-          gap: 10px;
-        }
-
-        .tab-next-btn {
-          font-size: 14px;
-          font-family: var(--font);
-          color: var(--accent);
-          background: none;
-          border: none;
-          cursor: pointer;
-          padding: 4px 0;
-        }
-
+        .tab-nav { display: flex; justify-content: flex-end; padding-top: 0.5rem; border-top: 0.5px solid var(--border); margin-top: 0.5rem; }
+        .tab-nav-split { justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; }
+        .tab-next-btn { font-size: 14px; font-family: var(--font); color: var(--accent); background: none; border: none; cursor: pointer; padding: 4px 0; }
         .tab-next-btn:hover { text-decoration: underline; }
-
-        .back-btn {
-          font-size: 14px;
-          font-family: var(--font);
-          color: var(--muted);
-          background: none;
-          border: none;
-          cursor: pointer;
-          padding: 4px 0;
-        }
-
+        .back-btn { font-size: 14px; font-family: var(--font); color: var(--muted); background: none; border: none; cursor: pointer; padding: 4px 0; }
         .back-btn:hover { color: var(--text); }
 
         /* ── Submit area on tab 1 ── */
-        .tab-submit {
-          padding: 0 1.5rem 1.5rem;
-        }
+        .tab-submit { padding: 0 1.5rem 1.5rem; }
 
-        /* ── Error ── */
-        .error {
-          font-size: 14px;
-          color: var(--error);
-          background: var(--error-bg);
-          border: 0.5px solid var(--error);
-          border-radius: var(--radius);
-          padding: 10px 14px;
-          margin-bottom: 1rem;
-        }
+        /* ── Error (API) ── */
+        .error { font-size: 14px; color: var(--error); background: var(--error-bg); border: 0.5px solid var(--error); border-radius: var(--radius); padding: 10px 14px; margin-bottom: 1rem; }
 
         /* ── Submit button ── */
         .submit-btn {
-          padding: 11px 24px;
-          font-size: 15px;
-          font-weight: 500;
-          font-family: var(--font);
-          color: #fff;
-          background: var(--accent);
-          border: none;
-          border-radius: var(--radius);
-          cursor: pointer;
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          white-space: nowrap;
-          transition: background 0.15s, opacity 0.15s;
+          padding: 11px 24px; font-size: 15px; font-weight: 500; font-family: var(--font);
+          color: #fff; background: var(--accent); border: none; border-radius: var(--radius);
+          cursor: pointer; display: flex; align-items: center; gap: 8px;
+          white-space: nowrap; transition: background 0.15s, opacity 0.15s;
         }
-
         .tab-submit .submit-btn { width: 100%; justify-content: center; }
-
         .submit-btn:hover:not(:disabled) { background: var(--accent-hover); }
         .submit-btn:disabled { opacity: 0.55; cursor: not-allowed; }
-
-        .spinner {
-          width: 15px;
-          height: 15px;
-          border: 2px solid rgba(255,255,255,0.35);
-          border-top-color: #fff;
-          border-radius: 50%;
-          animation: spin 0.7s linear infinite;
-          flex-shrink: 0;
-        }
-
+        .spinner { width: 15px; height: 15px; border: 2px solid rgba(255,255,255,0.35); border-top-color: #fff; border-radius: 50%; animation: spin 0.7s linear infinite; flex-shrink: 0; }
         @keyframes spin { to { transform: rotate(360deg); } }
 
         /* ── Result ── */
-        .result {
-          background: var(--surface);
-          border: 0.5px solid var(--border);
-          border-radius: 14px;
-          padding: 1.5rem;
-          box-shadow: var(--shadow);
-        }
-
-        .result-header {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          margin-bottom: 1.25rem;
-          padding-bottom: 1rem;
-          border-bottom: 0.5px solid var(--border);
-        }
-
+        .result { background: var(--surface); border: 0.5px solid var(--border); border-radius: 14px; padding: 1.5rem; box-shadow: var(--shadow); }
+        .result-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.25rem; padding-bottom: 1rem; border-bottom: 0.5px solid var(--border); }
         .result-header h2 { font-size: 17px; font-weight: 600; }
-
-        .reset-btn {
-          font-size: 13px;
-          font-family: var(--font);
-          color: var(--muted);
-          background: none;
-          border: 0.5px solid var(--border);
-          border-radius: 6px;
-          padding: 5px 10px;
-          cursor: pointer;
-          transition: color 0.15s, border-color 0.15s;
-        }
-
+        .reset-btn { font-size: 13px; font-family: var(--font); color: var(--muted); background: none; border: 0.5px solid var(--border); border-radius: 6px; padding: 5px 10px; cursor: pointer; transition: color 0.15s, border-color 0.15s; }
         .reset-btn:hover { color: var(--text); border-color: var(--muted); }
 
         /* ── Markdown ── */
@@ -786,6 +672,8 @@ export default function Home() {
           .tab-nav-split { flex-direction: column; align-items: stretch; }
           .tab-nav-split .submit-btn { justify-content: center; }
           .logo { font-size: 18px; }
+          .inline-warning { flex-wrap: wrap; }
+          .fix-btn { margin-left: 0; margin-top: 4px; }
         }
       `}</style>
     </div>
