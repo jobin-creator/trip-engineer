@@ -38,12 +38,20 @@ function buildPrompt(params: {
   arrivalTime: string;
   departureDate: string;
   departureTime: string;
+  groupType: string;
+  pace: string;
+  atmosphere: string[];
+  diningStyle: string;
+  beverages: string[];
+  shopping: string;
+  transport: string;
 }): string {
   const {
     destination, days, interests, budget,
     departureCity, stayArea,
     arrivalDate, arrivalTime,
     departureDate, departureTime,
+    groupType, pace, atmosphere, diningStyle, beverages, shopping, transport,
   } = params;
 
   // Build optional context blocks so the prompt stays clean when fields are empty
@@ -71,6 +79,64 @@ function buildPrompt(params: {
 
   const travelSection = travelContext
     ? `\nTravel logistics:\n${travelContext}\n`
+    : "";
+
+  // ---------------------------------------------------------------------------
+  // Build traveller style profile block
+  // ---------------------------------------------------------------------------
+  const groupLabels: Record<string, string> = {
+    solo: "Solo traveller",
+    couple: "Couple",
+    family: "Family with children",
+    group: "Group of friends",
+  };
+  const paceLabels: Record<string, string> = {
+    relaxed: "Relaxed pace — 1 to 2 highlights per day with long breaks. Do not overschedule.",
+    moderate: "Moderate pace — 3 to 4 activities per day with natural breaks.",
+    packed: "Packed schedule — maximise every day, fit in as much as possible.",
+  };
+  const diningLabels: Record<string, string> = {
+    local: "Strongly prefer authentic local taverns, street food, and casual neighbourhood spots. Avoid tourist traps.",
+    mixed: "Mix of casual local dining (80%) and one atmospheric special meal per trip (20%).",
+    special: "Seek out acclaimed, atmospheric restaurants — not stiff fine dining, but places with genuine character.",
+    veggie: "Vegetarian or vegan focus — prioritise destinations and dishes with strong plant-based options.",
+  };
+  const shoppingLabels: Record<string, string> = {
+    none: "Do not include shopping suggestions.",
+    markets: "Include local markets, independent shops, and artisan producers where relevant.",
+    brands: "Include quality flagship retail suggestions only where the destination offers something meaningfully better or cheaper than what is available at home.",
+    casual: "Mention interesting or characterful shops if they happen to be near activities.",
+  };
+  const transportLabels: Record<string, string> = {
+    transit: "Route all activities using metro, tram, and public transit. Name the specific line and stop for each major move. Only suggest this if the destination has a good public transport network.",
+    walking: "Prioritise walkable routes. Group activities by proximity to minimise transit.",
+    taxi: "Taxi and rideshare are acceptable for all journeys — include rough fare estimates.",
+    cycling: "Suggest cycling routes and bike hire where available.",
+    car: "Assume a hire car is available — include parking notes and driving directions where relevant.",
+  };
+
+  const beverageLines: string[] = [];
+  if (beverages.includes("coffee")) beverageLines.push("Include 1 independent specialty coffee stop per day — name the actual café.");
+  if (beverages.includes("tea")) beverageLines.push("Include tea houses or café culture spots relevant to the destination.");
+  if (beverages.includes("wine")) beverageLines.push("Include wine bars or local drink recommendations (vermouth, local spirits) in the evenings.");
+  if (beverages.includes("beer")) beverageLines.push("Include craft beer venues or characterful local pubs where relevant.");
+  if (beverages.includes("nonalcoholic")) beverageLines.push("Avoid recommending bars, pubs, or alcohol-focused venues. Focus on non-alcoholic options.");
+  if (beverages.includes("none")) beverageLines.push("No specific beverage preferences — skip café and bar suggestions unless central to the destination.");
+
+  const styleLines: string[] = [];
+  if (groupType && groupLabels[groupType]) styleLines.push(`Travelling group: ${groupLabels[groupType]}.`);
+  if (pace && paceLabels[pace]) styleLines.push(`Pace: ${paceLabels[pace]}`);
+  if (atmosphere.length > 0) styleLines.push(`Atmosphere preference: ${atmosphere.join(" and ")} — lean into this character when choosing between options.`);
+  if (diningStyle && diningLabels[diningStyle]) styleLines.push(`Dining: ${diningLabels[diningStyle]}`);
+  if (beverageLines.length > 0) styleLines.push(...beverageLines);
+  if (shopping && shoppingLabels[shopping]) styleLines.push(`Shopping: ${shoppingLabels[shopping]}`);
+  if (transport && transportLabels[transport]) styleLines.push(`Transport: ${transportLabels[transport]}`);
+
+  const styleSection = styleLines.length > 0
+    ? `
+Traveller profile:
+${styleLines.map(l => `- ${l}`).join("\n")}
+`
     : "";
 
   // Derive travel month for weather context
@@ -117,7 +183,7 @@ Create a ${days}-day travel itinerary for ${destination}.
 Traveller preferences:
 - Interests: ${interests || "general sightseeing, local food, culture"}
 - Budget level: ${budget}
-${travelSection}
+${styleSection}${travelSection}
 Format your response in this exact order:
 
 ## PART 1 — SUMMARY MATRIX
@@ -187,6 +253,13 @@ export async function POST(request: NextRequest) {
     arrivalTime: string;
     departureDate: string;
     departureTime: string;
+    groupType: string;
+    pace: string;
+    atmosphere: string[];
+    diningStyle: string;
+    beverages: string[];
+    shopping: string;
+    transport: string;
   };
 
   try {
@@ -202,6 +275,13 @@ export async function POST(request: NextRequest) {
       arrivalTime: (body.arrivalTime ?? "").trim(),
       departureDate: (body.departureDate ?? "").trim(),
       departureTime: (body.departureTime ?? "").trim(),
+      groupType: (body.groupType ?? "").trim(),
+      pace: (body.pace ?? "").trim(),
+      atmosphere: Array.isArray(body.atmosphere) ? body.atmosphere.map(String) : [],
+      diningStyle: (body.diningStyle ?? "").trim(),
+      beverages: Array.isArray(body.beverages) ? body.beverages.map(String) : [],
+      shopping: (body.shopping ?? "").trim(),
+      transport: (body.transport ?? "").trim(),
     };
   } catch {
     return new Response(JSON.stringify({ error: "Invalid request body." }), {
