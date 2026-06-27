@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -464,7 +465,7 @@ export default function Home() {
               <button className="reset-btn" onClick={handleReset}>Start over</button>
             </div>
             <div className="markdown-body">
-              <ReactMarkdown>{itinerary}</ReactMarkdown>
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{itinerary}</ReactMarkdown>
             </div>
           </section>
         )}
@@ -661,6 +662,41 @@ export default function Home() {
         .markdown-body ul, .markdown-body ol { padding-left: 1.4rem; margin-bottom: 0.75rem; }
         .markdown-body li { font-size: 15px; line-height: 1.65; margin-bottom: 0.35rem; color: var(--text); }
         .markdown-body h2:first-child { margin-top: 0; }
+
+        /* ── Markdown tables ── */
+        .markdown-body table {
+          width: 100%;
+          border-collapse: collapse;
+          font-size: 14px;
+          margin-bottom: 1.25rem;
+          display: block;
+          overflow-x: auto;
+        }
+
+        .markdown-body th {
+          background: var(--bg);
+          font-weight: 600;
+          font-size: 12px;
+          text-transform: uppercase;
+          letter-spacing: 0.04em;
+          color: var(--muted);
+          padding: 8px 12px;
+          border: 0.5px solid var(--border);
+          text-align: left;
+          white-space: nowrap;
+        }
+
+        .markdown-body td {
+          padding: 9px 12px;
+          border: 0.5px solid var(--border);
+          vertical-align: top;
+          line-height: 1.5;
+          color: var(--text);
+        }
+
+        .markdown-body tr:nth-child(even) td {
+          background: var(--bg);
+        }
 
         /* ── Mobile ── */
         @media (max-width: 480px) {

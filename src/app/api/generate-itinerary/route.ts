@@ -84,6 +84,32 @@ function buildPrompt(params: {
 - Flag any seasonal considerations: typhoon season, monsoon, extreme heat, major holidays that affect crowds or closures.
 - Keep this section concise — 4 to 6 bullet points.`;
 
+  // Build day labels for the matrix — use real dates if known, otherwise "Day N"
+  const matrixDayLabels = Array.from({ length: days }, (_, i) => {
+    if (arrivalDate) {
+      const d = new Date(arrivalDate);
+      d.setDate(d.getDate() + i);
+      const label = d.toLocaleDateString("en", { weekday: "short", day: "numeric", month: "short" });
+      return `Day ${i + 1} – ${label}`;
+    }
+    return `Day ${i + 1}`;
+  });
+
+  const departureDayLabel = departureDate
+    ? (() => {
+        const d = new Date(departureDate);
+        return `Departure – ${d.toLocaleDateString("en", { weekday: "short", day: "numeric", month: "short" })}`;
+      })()
+    : "";
+
+  const matrixRowsExample = matrixDayLabels
+    .map((label) => `| ${label} | [Morning anchor, 4 words] | [Afternoon anchor, 4 words] | [Evening anchor, 4 words] |`)
+    .join("\n");
+
+  const matrixDepartureRow = departureDayLabel
+    ? `| ${departureDayLabel} | — Transfer to airport | — | — |`
+    : "";
+
   return `You are Trip Engineer, an expert travel planner who creates detailed, practical itineraries.
 
 Create a ${days}-day travel itinerary for ${destination}.
@@ -92,21 +118,46 @@ Traveller preferences:
 - Interests: ${interests || "general sightseeing, local food, culture"}
 - Budget level: ${budget}
 ${travelSection}
-Format your response as follows:
-- Start with a 2-sentence overview of the trip
-- For each day, use the heading: ## Day N: [Theme for the day]
-- Under each day, list 3–5 activities with:
+Format your response in this exact order:
+
+## PART 1 — SUMMARY MATRIX
+
+Start with a 2-sentence overview of the trip (no heading, just plain text).
+
+Then immediately produce a summary matrix table with these exact columns:
+| Day | Morning | Afternoon | Evening |
+| --- | --- | --- | --- |
+${matrixRowsExample}
+${matrixDepartureRow}
+
+Rules for the matrix:
+- IMPORTANT: every table row must be on its own separate line — never collapse multiple rows onto one line
+- Each cell must be 3–5 words maximum — lead with the boldest anchor activity for that slot
+- If a slot is empty due to arrival/departure timing, write "—"
+- If arrival is afternoon or later on Day 1, Morning cell should be "— Arrive & settle in"
+- If departure is before noon on the last day, that row should show "— Transfer to airport" for all slots
+- Do not use markdown bold inside table cells
+- After the table, add a horizontal rule: ---
+
+## PART 2 — DAY-BY-DAY DETAIL
+
+For each day, use the heading: ## Day N: [Theme for the day]
+Under each day, list 3–5 activities with:
   - A bold activity name
   - 1–2 sentences describing it and why it suits this trip
   - A practical tip (best time to visit, booking advice, cost range)
 ${stayArea ? "  - Where relevant, note walking distance or transit time from " + stayArea : ""}
-- End with:
+
+## PART 3 — END SECTIONS (in this order)
 ${weatherInstruction}
 
 ## Getting there${departureCity ? ` from ${departureCity}` : ""}
 - Main transport options to reach ${destination}
 - Rough journey time and cost range
 - Best way to get from the airport/station to ${stayArea || "the city centre"}
+
+${days > 4 ? `## Quick-reference matrix
+Repeat the summary matrix table here for easy reference on longer trips.` : ""}
 
 Be specific — use real place names, real neighbourhoods, real restaurants. Do not use filler phrases like "a must-see" or "hidden gem".`;
 }
@@ -171,7 +222,7 @@ export async function POST(request: NextRequest) {
       try {
         const anthropicStream = anthropic.messages.stream({
           model: "claude-sonnet-4-5",
-          max_tokens: 2048,
+          max_tokens: 4096,
           messages: [{ role: "user", content: buildPrompt(params) }],
         });
 
